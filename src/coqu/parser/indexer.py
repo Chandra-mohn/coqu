@@ -68,37 +68,52 @@ class StructuralIndexer:
     # Regex patterns for COBOL structure
     # COBOL is column-sensitive: positions 1-6 are sequence, 7 is indicator,
     # 8-11 is Area A (divisions, sections, paragraph names), 12-72 is Area B
+    #
+    # Supported formats:
+    # 1. Traditional mainframe: 6 digits in columns 1-6 ("000100")
+    # 2. Free format: leading spaces ("      ")
+    # 3. Panvalet/Librarian: version markers ("1.1    ", "07.141 ")
+    # 4. Mixed: any combination
+    #
+    # The PREFIX is intentionally flexible to handle various source control outputs
+
+    # Prefix pattern matches:
+    # - 6 digits (sequence numbers): "000100"
+    # - 6 spaces: "      "
+    # - Version markers: "1.1    ", "07.141", "01.141"
+    # - Panvalet with area indicator: "7.682A", "7.141A" (A=Area A, B=Area B)
+    # - Any mix of digits, dots, letters, spaces before code starts
+    PREFIX = r"^[\d\s.A-Z]{0,10}\s*"
 
     # Division pattern: "IDENTIFICATION DIVISION" or "ID DIVISION", etc.
     DIVISION_PATTERN = re.compile(
-        r"^\s{0,6}[\s\d]{0,6}\s*(IDENTIFICATION|ID|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION",
+        PREFIX + r"\s*(IDENTIFICATION|ID|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION",
         re.IGNORECASE | re.MULTILINE,
     )
 
     # Section pattern: "WORKING-STORAGE SECTION", "INPUT-OUTPUT SECTION", etc.
-    # Sections can appear with variable indentation depending on the division
     SECTION_PATTERN = re.compile(
-        r"^\s{6,8}([A-Z0-9][A-Z0-9-]*)\s+SECTION\s*\.",
+        PREFIX + r"\s*([A-Z0-9][A-Z0-9-]*)\s+SECTION\s*\.?",
         re.IGNORECASE | re.MULTILINE,
     )
 
-    # Paragraph pattern: paragraph name at start of line followed by period
-    # COBOL paragraphs start in Area A (columns 8-11), which means they have
-    # 6-8 leading spaces. They end with just a period on that line.
+    # Paragraph pattern: paragraph name in Area A followed by period
+    # Must be at column 8 (after 6-digit sequence + indicator)
+    # Paragraph names start with letter or digit, contain letters, digits, hyphens
     PARAGRAPH_PATTERN = re.compile(
-        r"^\s{6,8}([A-Z0-9][A-Z0-9-]*)\s*\.\s*$",
+        PREFIX + r"([A-Z0-9][A-Z0-9-]{0,29})\s*\.\s*$",
         re.IGNORECASE | re.MULTILINE,
     )
 
-    # COPY statement
+    # COPY statement - can appear anywhere in Area B
     COPY_PATTERN = re.compile(
-        r"^\s{0,6}[\s\d]{0,6}\s*COPY\s+([A-Z][A-Z0-9-]*)",
+        PREFIX + r"\s*COPY\s+['\"]?([A-Z][A-Z0-9-]*)['\"]?",
         re.IGNORECASE | re.MULTILINE,
     )
 
     # Level 01 data items
     LEVEL_01_PATTERN = re.compile(
-        r"^\s{0,6}[\s\d]{0,6}\s*01\s+([A-Z][A-Z0-9-]*)",
+        PREFIX + r"\s*01\s+([A-Z][A-Z0-9-]*)",
         re.IGNORECASE | re.MULTILINE,
     )
 
@@ -112,6 +127,9 @@ class StructuralIndexer:
         Returns:
             StructuralIndex with divisions, sections, paragraphs, etc.
         """
+        # Normalize line endings (Windows CRLF -> LF)
+        source = source.replace("\r\n", "\n").replace("\r", "\n")
+
         index = StructuralIndex()
         lines = source.split("\n")
         index.total_lines = len(lines)

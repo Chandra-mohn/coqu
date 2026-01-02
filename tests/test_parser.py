@@ -13,6 +13,7 @@ from coqu.parser.ast import CobolProgram
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 SAMPLE_CBL = FIXTURES_DIR / "sample.cbl"
 CALLER_CBL = FIXTURES_DIR / "caller.cbl"
+MAINFRAME_CBL = FIXTURES_DIR / "mainframe.cbl"
 
 
 class TestStructuralIndexer:
@@ -69,6 +70,63 @@ class TestStructuralIndexer:
         item_names = [i.name for i in index.data_items_01]
         assert "WS-VARIABLES" in item_names
         assert "WS-CONSTANTS" in item_names
+
+
+class TestMainframeFormat:
+    """Tests for mainframe-format COBOL with sequence numbers."""
+
+    def test_index_mainframe_divisions(self):
+        """Test indexer finds divisions in mainframe format."""
+        source = MAINFRAME_CBL.read_text()
+        indexer = StructuralIndexer()
+        index = indexer.index(source)
+
+        division_names = index.get_division_names()
+        assert "IDENTIFICATION DIVISION" in division_names
+        assert "ENVIRONMENT DIVISION" in division_names
+        assert "DATA DIVISION" in division_names
+        assert "PROCEDURE DIVISION" in division_names
+
+    def test_index_mainframe_paragraphs(self):
+        """Test indexer finds paragraphs in mainframe format."""
+        source = MAINFRAME_CBL.read_text()
+        indexer = StructuralIndexer()
+        index = indexer.index(source)
+
+        para_names = index.get_paragraph_names()
+        assert "0000-MAIN" in para_names
+        assert "1000-INITIALIZE" in para_names
+        assert "2100-VALIDATE" in para_names
+        assert "2200-UPDATE-DB" in para_names
+        assert "9000-TERMINATE" in para_names
+
+    def test_index_mainframe_sections(self):
+        """Test indexer finds sections in mainframe format."""
+        source = MAINFRAME_CBL.read_text()
+        indexer = StructuralIndexer()
+        index = indexer.index(source)
+
+        section_names = index.get_section_names()
+        assert any("WORKING-STORAGE" in s for s in section_names)
+        assert any("LINKAGE" in s for s in section_names)
+
+    def test_index_mainframe_copybooks(self):
+        """Test indexer finds COPY statements in mainframe format."""
+        source = MAINFRAME_CBL.read_text()
+        indexer = StructuralIndexer()
+        index = indexer.index(source)
+
+        copybook_names = [c.name for c in index.copybooks]
+        assert "COMAREA" in copybook_names
+
+    def test_parse_mainframe_file(self):
+        """Test full parsing of mainframe format file."""
+        parser = CobolParser(use_indexer_only=True)
+        program = parser.parse_file(MAINFRAME_CBL)
+
+        assert program.program_id == "MAINFRAME"
+        assert len(program.divisions) == 4
+        assert len(program.get_all_paragraphs()) >= 5
 
 
 class TestCobolParser:
