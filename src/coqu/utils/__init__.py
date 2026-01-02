@@ -1,8 +1,7 @@
 # coqu.utils - Utility functions
-from coqu.utils.source import SourceFile, read_source, compute_hash
+from coqu.utils.spinner import Spinner, ProgressCounter
 
 __all__ = [
-    "SourceFile",
-    "read_source",
-    "compute_hash",
+    "Spinner",
+    "ProgressCounter",
 ]

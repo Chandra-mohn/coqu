@@ -1,10 +1,10 @@
 # coqu.parser.preprocessor - COBOL preprocessor for COPY/REPLACE
 """
 Preprocessor for COBOL source code.
-Handles COPY statement resolution and REPLACE directives.
+Handles COPY statement resolution, REPLACE directives, and source format normalization.
 """
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +19,8 @@ class PreprocessorResult:
     copybook_refs: list[CopybookRef]
     warnings: list[str]
     errors: list[str]
+    format_detected: str = "standard"  # standard, panvalet, librarian
+    was_normalized: bool = False
 
 
 class Preprocessor:
@@ -56,6 +58,18 @@ class Preprocessor:
     # Common copybook extensions
     COPYBOOK_EXTENSIONS = [".cpy", ".copy", ".cbl", ".cob", ""]
 
+    # Pattern to detect Panvalet/Librarian version markers
+    # Matches: "1.1", "07.141", "3.2001", "7.682A", "01.141B"
+    # These appear in columns 1-6 followed by spaces
+    PANVALET_PREFIX_PATTERN = re.compile(
+        r"^(\d{1,2}\.\d{1,4}[A-B]?)\s+",
+    )
+
+    # Pattern to detect traditional sequence numbers (6 digits)
+    SEQUENCE_PATTERN = re.compile(
+        r"^(\d{6})\s",
+    )
+
     def __init__(self, copybook_paths: Optional[list[Path]] = None):
         """
         Initialize preprocessor.
@@ -72,11 +86,106 @@ class Preprocessor:
         if path not in self.copybook_paths:
             self.copybook_paths.append(path)
 
+    def detect_format(self, source: str) -> str:
+        """
+        Detect the source code format.
+
+        Returns:
+            'panvalet' - Panvalet/Librarian format with version markers
+            'sequence' - Traditional format with 6-digit sequence numbers
+            'standard' - Standard format (spaces in columns 1-6)
+        """
+        lines = source.split('\n')
+
+        # Sample first 20 non-empty lines
+        sample_lines = []
+        for line in lines:
+            if line.strip():
+                sample_lines.append(line)
+                if len(sample_lines) >= 20:
+                    break
+
+        if not sample_lines:
+            return "standard"
+
+        panvalet_count = 0
+        sequence_count = 0
+        standard_count = 0
+
+        for line in sample_lines:
+            if self.PANVALET_PREFIX_PATTERN.match(line):
+                panvalet_count += 1
+            elif self.SEQUENCE_PATTERN.match(line):
+                sequence_count += 1
+            elif line.startswith('      ') or line.startswith('\t'):
+                standard_count += 1
+
+        # Determine format based on majority
+        if panvalet_count > len(sample_lines) * 0.5:
+            return "panvalet"
+        elif sequence_count > len(sample_lines) * 0.5:
+            return "sequence"
+        else:
+            return "standard"
+
+    def normalize_format(self, source: str, source_format: str) -> str:
+        """
+        Normalize source to standard COBOL reference format.
+
+        Converts Panvalet/Librarian format (version markers in cols 1-6)
+        to standard format (spaces in cols 1-6) so ANTLR can parse it.
+
+        Args:
+            source: Original COBOL source
+            source_format: Detected format ('panvalet', 'sequence', 'standard')
+
+        Returns:
+            Normalized source with standard column format
+        """
+        if source_format == "standard":
+            return source
+
+        lines = source.split('\n')
+        normalized_lines = []
+
+        for line in lines:
+            if not line:
+                normalized_lines.append(line)
+                continue
+
+            if source_format == "panvalet":
+                # Strip Panvalet version prefix, replace with 6 spaces
+                match = self.PANVALET_PREFIX_PATTERN.match(line)
+                if match:
+                    prefix_len = len(match.group(0))
+                    # Keep everything after the prefix, prepend 6 spaces
+                    rest = line[prefix_len:]
+                    # Add indicator column (space) if rest doesn't have it
+                    normalized = '      ' + rest
+                    normalized_lines.append(normalized)
+                else:
+                    # Line doesn't have prefix, use as-is
+                    normalized_lines.append(line)
+
+            elif source_format == "sequence":
+                # Traditional 6-digit sequence numbers - already correct format
+                # but we can strip them for cleaner parsing
+                match = self.SEQUENCE_PATTERN.match(line)
+                if match:
+                    # Replace sequence with spaces
+                    normalized = '      ' + line[6:]
+                    normalized_lines.append(normalized)
+                else:
+                    normalized_lines.append(line)
+
+        return '\n'.join(normalized_lines)
+
     def preprocess(
         self,
         source: str,
         source_path: Optional[Path] = None,
         resolve_copybooks: bool = True,
+        normalize: bool = True,
     ) -> PreprocessorResult:
         """
         Preprocess COBOL source code.
@@ -85,6 +194,7 @@ class Preprocessor:
             source: COBOL source code
             source_path: Path to source file (for relative copybook resolution)
             resolve_copybooks: Whether to inline copybook contents
+            normalize: Whether to normalize source format for ANTLR parsing
 
         Returns:
             PreprocessorResult with preprocessed source and metadata
@@ -99,6 +209,14 @@ class Preprocessor:
 
         # Reset processed copybooks for this run
         self._processed_copybooks.clear()
+
+        # Detect and normalize source format
+        if normalize:
+            result.format_detected = self.detect_format(source)
+            if result.format_detected != "standard":
+                source = self.normalize_format(source, result.format_detected)
+                result.source = source
+                result.was_normalized = True
 
         # Find all COPY statements
         copybook_refs = self._find_copy_statements(source)

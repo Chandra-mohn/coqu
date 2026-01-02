@@ -324,6 +324,89 @@ class CobolProgram:
         end = location.line_end
         return "\n".join(self.source_lines[start:end])
 
+    def get_chunk(self, line_start: int, line_end: int) -> str:
+        """Extract a chunk of source code by line numbers."""
+        if not self.source_lines:
+            return ""
+        # Convert to 0-based index
+        start = max(0, line_start - 1)
+        end = min(len(self.source_lines), line_end)
+        return "\n".join(self.source_lines[start:end])
+
+    def analyze_paragraph(self, para_name: str) -> Optional[dict]:
+        """
+        Analyze a paragraph using chunk-based analysis.
+
+        Returns semantic information extracted on-demand from just
+        the paragraph's source code, not the entire file.
+
+        Args:
+            para_name: Name of paragraph to analyze
+
+        Returns:
+            Dict with performs, calls, data_refs or None if not found
+        """
+        from coqu.parser.chunk_analyzer import ChunkAnalyzer
+
+        para = self.get_paragraph(para_name)
+        if not para or not self.source_lines:
+            return None
+
+        analyzer = ChunkAnalyzer()
+        chunk = self.get_chunk(para.location.line_start, para.location.line_end)
+        result = analyzer.analyze(chunk)
+
+        return {
+            "name": para.name,
+            "line_start": para.location.line_start,
+            "line_end": para.location.line_end,
+            "performs": result.performs,
+            "calls": result.calls,
+            "data_refs": result.data_refs,
+            "moves": result.moves,
+        }
+
+    def analyze_section(self, section_name: str) -> Optional[dict]:
+        """
+        Analyze a section using chunk-based analysis.
+
+        Args:
+            section_name: Name of section to analyze
+
+        Returns:
+            Dict with aggregated semantic info from all paragraphs
+        """
+        from coqu.parser.chunk_analyzer import ChunkAnalyzer
+
+        # Find section
+        target_section = None
+        for div in self.divisions:
+            for section in div.sections:
+                if section_name.upper() in section.name.upper():
+                    target_section = section
+                    break
+            if target_section:
+                break
+
+        if not target_section or not self.source_lines:
+            return None
+
+        analyzer = ChunkAnalyzer()
+        chunk = self.get_chunk(
+            target_section.location.line_start,
+            target_section.location.line_end,
+        )
+        result = analyzer.analyze(chunk)
+
+        return {
+            "name": target_section.name,
+            "line_start": target_section.location.line_start,
+            "line_end": target_section.location.line_end,
+            "performs": result.performs,
+            "calls": result.calls,
+            "data_refs": result.data_refs,
+        }
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {

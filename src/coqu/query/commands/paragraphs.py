@@ -73,7 +73,7 @@ class ParagraphCommand(Command):
     name = "paragraph"
     aliases = ["p"]
     help = "Show details of a specific paragraph"
-    usage = "paragraph <name> [program] [--body]"
+    usage = "paragraph <name> [program] [--body] [--analyze]"
 
     def execute(self, workspace, args: list[str], options: dict) -> QueryResult:
         args, opts = self.parse_options(args)
@@ -85,6 +85,7 @@ class ParagraphCommand(Command):
         para_name = args[0].upper()
         program_name = args[1] if len(args) > 1 else None
         include_body = options.get("body", False)
+        do_analyze = options.get("analyze", False)
 
         # Get target programs
         if program_name:
@@ -105,9 +106,24 @@ class ParagraphCommand(Command):
                     "program": prog.name,
                     "name": para.name,
                     "location": str(para.location),
-                    "performs": para.performs,
-                    "calls": para.calls,
                 }
+
+                # Use chunk-based analysis for semantic info
+                if do_analyze:
+                    # On-demand chunk analysis - fast even for huge files
+                    analysis = prog.program.analyze_paragraph(para_name)
+                    if analysis:
+                        item["performs"] = analysis["performs"]
+                        item["calls"] = analysis["calls"]
+                        item["data_refs"] = analysis["data_refs"]
+                        item["moves"] = analysis["moves"]
+                    else:
+                        item["performs"] = para.performs
+                        item["calls"] = para.calls
+                else:
+                    # Use cached/indexed data
+                    item["performs"] = para.performs
+                    item["calls"] = para.calls
 
                 if include_body:
                     item["body"] = prog.get_body(para.location)

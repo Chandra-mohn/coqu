@@ -11,6 +11,7 @@ from coqu.parser.ast import (
 from coqu.parser.cobol_parser import CobolParser
 from coqu.parser.indexer import StructuralIndexer, StructuralIndex
 from coqu.parser.preprocessor import Preprocessor
+from coqu.parser.chunk_analyzer import ChunkAnalyzer, ChunkAnalysis, analyze_chunk
 
 __all__ = [
     "CobolProgram",
@@ -24,4 +25,7 @@ __all__ = [
     "StructuralIndexer",
     "StructuralIndex",
     "Preprocessor",
+    "ChunkAnalyzer",
+    "ChunkAnalysis",
+    "analyze_chunk",
 ]

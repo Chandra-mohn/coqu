@@ -12,7 +12,7 @@ class CallsCommand(Command):
     name = "calls"
     aliases = ["call"]
     help = "List all CALL statements in loaded programs"
-    usage = "calls [program] [--target=name]"
+    usage = "calls [program] [--target=name] [--analyze]"
 
     def execute(self, workspace, args: list[str], options: dict) -> QueryResult:
         args, opts = self.parse_options(args)
@@ -20,6 +20,7 @@ class CallsCommand(Command):
 
         program_name = args[0] if args else None
         target_filter = options.get("target", "").upper()
+        do_analyze = options.get("analyze", False)
 
         # Get target programs
         if program_name:
@@ -35,7 +36,14 @@ class CallsCommand(Command):
         items = []
         for prog in programs:
             for para in prog.get_all_paragraphs():
-                for call in para.calls:
+                # Use chunk analysis if requested
+                if do_analyze:
+                    analysis = prog.program.analyze_paragraph(para.name)
+                    calls = analysis["calls"] if analysis else para.calls
+                else:
+                    calls = para.calls
+
+                for call in calls:
                     if target_filter and target_filter not in call.upper():
                         continue
                     items.append({
@@ -54,7 +62,7 @@ class PerformsCommand(Command):
     name = "performs"
     aliases = ["perform"]
     help = "List all PERFORM statements in loaded programs"
-    usage = "performs [program] [--target=name]"
+    usage = "performs [program] [--target=name] [--analyze]"
 
     def execute(self, workspace, args: list[str], options: dict) -> QueryResult:
         args, opts = self.parse_options(args)
@@ -62,6 +70,7 @@ class PerformsCommand(Command):
 
         program_name = args[0] if args else None
         target_filter = options.get("target", "").upper()
+        do_analyze = options.get("analyze", False)
 
         # Get target programs
         if program_name:
@@ -77,7 +86,14 @@ class PerformsCommand(Command):
         items = []
         for prog in programs:
             for para in prog.get_all_paragraphs():
-                for perform in para.performs:
+                # Use chunk analysis if requested
+                if do_analyze:
+                    analysis = prog.program.analyze_paragraph(para.name)
+                    performs = analysis["performs"] if analysis else para.performs
+                else:
+                    performs = para.performs
+
+                for perform in performs:
                     if target_filter and target_filter not in perform.upper():
                         continue
                     items.append({
@@ -91,18 +107,12 @@ class PerformsCommand(Command):
 
 
 class MovesCommand(Command):
-    """List MOVE statements (basic extraction)."""
+    """List MOVE statements using chunk-based analysis."""
 
     name = "moves"
     aliases = ["move"]
     help = "List MOVE statements in a paragraph"
     usage = "moves <paragraph> [program]"
-
-    # Pattern to extract MOVE statements
-    MOVE_PATTERN = re.compile(
-        r"MOVE\s+(\S+)\s+TO\s+(\S+)",
-        re.IGNORECASE,
-    )
 
     def execute(self, workspace, args: list[str], options: dict) -> QueryResult:
         args, opts = self.parse_options(args)
@@ -127,20 +137,17 @@ class MovesCommand(Command):
 
         items = []
         for prog in programs:
-            para = prog.get_paragraph(para_name)
-            if not para:
+            # Use chunk-based analysis
+            analysis = prog.program.analyze_paragraph(para_name)
+            if not analysis:
                 continue
 
-            # Get paragraph body
-            body = prog.get_body(para.location)
-
-            # Find MOVE statements
-            for match in self.MOVE_PATTERN.finditer(body):
+            for from_val, to_val in analysis.get("moves", []):
                 items.append({
                     "program": prog.name,
-                    "paragraph": para.name,
-                    "from": match.group(1),
-                    "to": match.group(2),
+                    "paragraph": para_name,
+                    "from": from_val,
+                    "to": to_val,
                 })
 
         if not items:

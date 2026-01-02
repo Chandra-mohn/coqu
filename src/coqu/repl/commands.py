@@ -5,6 +5,8 @@ Handles / prefixed meta commands in the REPL.
 from pathlib import Path
 from typing import Callable, Optional
 
+from coqu.utils.spinner import ProgressCounter
+
 
 class MetaCommandHandler:
     """
@@ -99,19 +101,6 @@ class MetaCommandHandler:
 
     # Command implementations
 
-    def _print_progress(self, stage: str, percent: int) -> None:
-        """Print progress indicator inline."""
-        import sys
-        bar_width = 30
-        filled = int(bar_width * percent / 100)
-        bar = "=" * filled + "-" * (bar_width - filled)
-        # Use carriage return to overwrite line
-        sys.stdout.write(f"\r[{bar}] {percent:3d}% {stage:<20}")
-        sys.stdout.flush()
-        if percent >= 100:
-            sys.stdout.write("\r" + " " * 60 + "\r")  # Clear line
-            sys.stdout.flush()
-
     def cmd_load(self, args: list[str]) -> tuple[str, bool]:
         """Load a COBOL file."""
         if not args:
@@ -122,7 +111,7 @@ class MetaCommandHandler:
             return f"File not found: {path}", False
 
         try:
-            prog = self.workspace.load(path, progress_callback=self._print_progress)
+            prog = self.workspace.load(path, show_spinner=True)
             cache_str = " (from cache)" if prog.from_cache else f" (parsed in {prog.parse_time_ms:.0f}ms)"
             return f"Loaded {prog.name}: {prog.program_id} ({prog.lines} lines){cache_str}", False
         except Exception as e:
@@ -139,8 +128,25 @@ class MetaCommandHandler:
         if not directory.is_dir():
             return f"Not a directory: {directory}", False
 
-        programs = self.workspace.load_directory(directory, pattern)
-        return f"Loaded {len(programs)} programs from {directory}", False
+        # Count files first
+        files = list(directory.glob(pattern))
+        if not files:
+            return f"No files matching '{pattern}' in {directory}", False
+
+        # Load with progress counter
+        progress = ProgressCounter("Loading files", len(files))
+        loaded = []
+        for path in files:
+            if path.is_file():
+                try:
+                    prog = self.workspace.load(path)
+                    loaded.append(prog)
+                except Exception:
+                    pass
+            progress.increment()
+
+        progress.done(f"Loaded {len(loaded)} programs from {directory}")
+        return "", False  # Message already printed by progress.done()
 
     def cmd_unload(self, args: list[str]) -> tuple[str, bool]:
         """Unload a program."""
@@ -155,12 +161,12 @@ class MetaCommandHandler:
     def cmd_reload(self, args: list[str]) -> tuple[str, bool]:
         """Reload program(s)."""
         if args:
-            prog = self.workspace.reload(args[0], progress_callback=self._print_progress)
+            prog = self.workspace.reload(args[0], show_spinner=True)
             if prog:
                 return f"Reloaded {prog.name} ({prog.parse_time_ms:.0f}ms)", False
             return f"Program not loaded: {args[0]}", False
         else:
-            programs = self.workspace.reload_all(progress_callback=self._print_progress)
+            programs = self.workspace.reload_all()
             return f"Reloaded {len(programs)} programs", False
 
     def cmd_list(self, args: list[str]) -> tuple[str, bool]:

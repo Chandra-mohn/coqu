@@ -310,30 +310,24 @@ class CobolParser:
         """Add copybook search path."""
         self.preprocessor.add_copybook_path(path)
 
-    def parse_file(
-        self,
-        path: Path,
-        progress_callback: Optional[callable] = None,
-    ) -> CobolProgram:
+    def parse_file(self, path: Path) -> CobolProgram:
         """
         Parse COBOL file.
 
         Args:
             path: Path to COBOL source file
-            progress_callback: Optional callback(stage, percent) for progress
 
         Returns:
             CobolProgram AST
         """
         source = path.read_text()
-        return self.parse(source, path, progress_callback=progress_callback)
+        return self.parse(source, path)
 
     def parse(
         self,
         source: str,
         path: Optional[Path] = None,
         preprocess: bool = True,
-        progress_callback: Optional[callable] = None,
     ) -> CobolProgram:
         """
         Parse COBOL source code.
@@ -342,7 +336,6 @@ class CobolParser:
             source: COBOL source code
             path: Optional path for copybook resolution
             preprocess: Whether to preprocess (resolve copybooks)
-            progress_callback: Optional callback(stage, percent) for progress
 
         Returns:
             CobolProgram AST
@@ -368,12 +361,11 @@ class CobolParser:
             # Fast path: use structural indexer only
             return self._parse_with_indexer(
                 source, source_lines, path, source_hash, program_id, copybook_refs,
-                progress_callback=progress_callback,
             )
 
         # Full ANTLR parse
         return self._parse_with_antlr(
-            source, source_lines, path, source_hash, program_id, copybook_refs
+            source, source_lines, path, source_hash, program_id, copybook_refs,
         )
 
     def _parse_with_antlr(
@@ -413,7 +405,7 @@ class CobolParser:
                     print(f"Parse error: {err}")
             # Fall back to indexer on parse error
             return self._parse_with_indexer(
-                source, source_lines, path, source_hash, program_id, copybook_refs
+                source, source_lines, path, source_hash, program_id, copybook_refs,
             )
 
         # Extract AST using visitor
@@ -442,10 +434,9 @@ class CobolParser:
         source_hash: str,
         program_id: str,
         copybook_refs: list[CopybookRef],
-        progress_callback: Optional[callable] = None,
     ) -> CobolProgram:
         """Parse using fast structural indexer."""
-        index = self.indexer.index(source, progress_callback=progress_callback)
+        index = self.indexer.index(source)
 
         # Convert index to AST
         divisions: list[Division] = []

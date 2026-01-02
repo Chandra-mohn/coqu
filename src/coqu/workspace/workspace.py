@@ -10,6 +10,7 @@ from coqu.parser.cobol_parser import CobolParser
 from coqu.parser.ast import CobolProgram
 from coqu.workspace.program import LoadedProgram
 from coqu.workspace.copybook import CopybookResolver
+from coqu.utils.spinner import Spinner, ProgressCounter
 
 
 class Workspace:
@@ -62,7 +63,7 @@ class Workspace:
         self,
         path: Path,
         force_reparse: bool = False,
-        progress_callback: Optional[callable] = None,
+        show_spinner: bool = False,
     ) -> LoadedProgram:
         """
         Load a COBOL program into the workspace.
@@ -70,15 +71,11 @@ class Workspace:
         Args:
             path: Path to COBOL source file
             force_reparse: Force parsing even if cached
-            progress_callback: Optional callback(stage, percent) for progress
+            show_spinner: Show ASCII spinner during loading
 
         Returns:
             LoadedProgram instance
         """
-        def report(stage: str, pct: int) -> None:
-            if progress_callback:
-                progress_callback(stage, pct)
-
         path = path.resolve()
         name = path.stem.upper()
 
@@ -88,50 +85,50 @@ class Workspace:
             if existing.path == path:
                 return existing
 
-        report("Reading file", 5)
+        spinner = None
+        if show_spinner:
+            spinner = Spinner(f"Loading {path.name}").start()
 
-        # Read source for hash calculation
-        source = path.read_text()
-        import hashlib
-        source_hash = hashlib.sha256(source.encode()).hexdigest()
+        try:
+            # Read source for hash calculation
+            source = path.read_text()
+            import hashlib
+            source_hash = hashlib.sha256(source.encode()).hexdigest()
 
-        # Try cache first
-        program: Optional[CobolProgram] = None
-        from_cache = False
+            # Try cache first
+            program: Optional[CobolProgram] = None
+            from_cache = False
 
-        if self.cache_manager and not force_reparse:
-            report("Checking cache", 10)
-            program = self.cache_manager.get(source_hash)
-            if program:
-                from_cache = True
-                report("Loaded from cache", 100)
+            if self.cache_manager and not force_reparse:
+                program = self.cache_manager.get(source_hash)
+                if program:
+                    from_cache = True
 
-        # Parse if not cached
-        parse_time_ms = 0.0
-        if not program:
-            # Note: indexer reports progress from 15-90% internally
-            start = time.perf_counter()
-            program = self._parser.parse_file(path, progress_callback=progress_callback)
-            parse_time_ms = (time.perf_counter() - start) * 1000
+            # Parse if not cached
+            parse_time_ms = 0.0
+            if not program:
+                start = time.perf_counter()
+                program = self._parser.parse_file(path)
+                parse_time_ms = (time.perf_counter() - start) * 1000
 
-            # Cache the result
-            if self.cache_manager:
-                report("Caching", 92)
-                self.cache_manager.put(source_hash, program)
+                # Cache the result
+                if self.cache_manager:
+                    self.cache_manager.put(source_hash, program)
 
-        report("Complete", 100)
+            # Create loaded program
+            loaded = LoadedProgram(
+                name=name,
+                path=path,
+                program=program,
+                from_cache=from_cache,
+                parse_time_ms=parse_time_ms,
+            )
 
-        # Create loaded program
-        loaded = LoadedProgram(
-            name=name,
-            path=path,
-            program=program,
-            from_cache=from_cache,
-            parse_time_ms=parse_time_ms,
-        )
-
-        self.programs[name] = loaded
-        return loaded
+            self.programs[name] = loaded
+            return loaded
+        finally:
+            if spinner:
+                spinner.stop()
 
     def load_directory(
         self,
@@ -197,14 +194,14 @@ class Workspace:
     def reload(
         self,
         name: str,
-        progress_callback: Optional[callable] = None,
+        show_spinner: bool = False,
     ) -> Optional[LoadedProgram]:
         """
         Reload a program (reparse from source).
 
         Args:
             name: Program name
-            progress_callback: Optional progress callback
+            show_spinner: Show ASCII spinner during loading
 
         Returns:
             Reloaded program or None if not found
@@ -214,12 +211,9 @@ class Workspace:
             return None
 
         path = self.programs[name_upper].path
-        return self.load(path, force_reparse=True, progress_callback=progress_callback)
+        return self.load(path, force_reparse=True, show_spinner=show_spinner)
 
-    def reload_all(
-        self,
-        progress_callback: Optional[callable] = None,
-    ) -> list[LoadedProgram]:
+    def reload_all(self) -> list[LoadedProgram]:
         """
         Reload all programs.
 
@@ -227,16 +221,23 @@ class Workspace:
             List of reloaded programs
         """
         paths = [prog.path for prog in self.programs.values()]
+        total = len(paths)
         self.programs.clear()
 
+        if total == 0:
+            return []
+
+        progress = ProgressCounter("Reloading", total)
         reloaded = []
         for path in paths:
             try:
-                prog = self.load(path, force_reparse=True, progress_callback=progress_callback)
+                prog = self.load(path, force_reparse=True)
                 reloaded.append(prog)
             except Exception:
                 pass
+            progress.increment()
 
+        progress.done()
         return reloaded
 
     def get(self, name: str) -> Optional[LoadedProgram]:
