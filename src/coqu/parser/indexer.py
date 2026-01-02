@@ -170,29 +170,56 @@ class StructuralIndexer:
         # Progress allocation: divisions 10-15, sections 15-35, paragraphs 35-55,
         #                      copybooks 55-75, data items 75-90
         total_chars = len(source)
+        total_lines = len(line_offsets)
         is_large_file = total_chars > 500000  # ~10K+ lines
 
-        def scan_with_progress(
+        def scan_chunked_with_progress(
             pattern,
             stage_name: str,
             start_pct: int,
             end_pct: int,
-            start_offset: int = 0,
+            start_line: int = 1,
         ):
-            """Scan with progress reporting for large files."""
-            matches = []
-            last_report_pos = start_offset
-            report_interval = max(total_chars // 20, 100000)  # Report every 5% or 100KB
+            """
+            Scan source in chunks, reporting progress between chunks.
 
-            for match in pattern.finditer(source, start_offset):
-                matches.append(match)
-                # Report progress periodically
-                if is_large_file and match.start() - last_report_pos > report_interval:
-                    progress_in_stage = (match.start() - start_offset) / max(total_chars - start_offset, 1)
-                    current_pct = start_pct + int(progress_in_stage * (end_pct - start_pct))
-                    line_num = get_line_num(match.start())
-                    report(f"{stage_name} (line {line_num:,})", current_pct)
-                    last_report_pos = match.start()
+            For large files, this ensures the progress bar updates even when
+            matches are sparse (e.g., 618 sections in 254K lines).
+            """
+            matches = []
+
+            if not is_large_file:
+                # Small file - just scan directly
+                start_offset = line_offsets[start_line - 1] if start_line > 1 else 0
+                for match in pattern.finditer(source, start_offset):
+                    matches.append((match, get_line_num(match.start())))
+                return matches
+
+            # Large file - scan in chunks of ~10K lines for smooth progress
+            chunk_size = 10000  # lines per chunk
+            end_line = total_lines
+
+            current_line = start_line
+            while current_line < end_line:
+                # Calculate chunk boundaries
+                chunk_end_line = min(current_line + chunk_size, end_line)
+                chunk_start_offset = line_offsets[current_line - 1] if current_line > 1 else 0
+                chunk_end_offset = line_offsets[chunk_end_line - 1] if chunk_end_line < total_lines else total_chars
+
+                # Extract chunk and search
+                chunk = source[chunk_start_offset:chunk_end_offset]
+                for match in pattern.finditer(chunk):
+                    actual_pos = chunk_start_offset + match.start()
+                    line_num = get_line_num(actual_pos)
+                    # Create a simple match-like object with the info we need
+                    matches.append((match, line_num))
+
+                # Report progress based on lines processed
+                progress_in_stage = (chunk_end_line - start_line) / max(end_line - start_line, 1)
+                current_pct = start_pct + int(progress_in_stage * (end_pct - start_pct))
+                report(f"{stage_name} (line {chunk_end_line:,})", current_pct)
+
+                current_line = chunk_end_line
 
             return matches
 
@@ -211,11 +238,10 @@ class StructuralIndexer:
         report("Finding sections", 15)
 
         # Index sections with progress
-        section_matches = scan_with_progress(
+        section_matches = scan_chunked_with_progress(
             self.SECTION_PATTERN, "Sections", 15, 35
         )
-        for match in section_matches:
-            line_num = get_line_num(match.start())
+        for match, line_num in section_matches:
             section_name = match.group(1).upper()
             index.sections.append(IndexEntry(
                 name=f"{section_name} SECTION",
@@ -227,21 +253,17 @@ class StructuralIndexer:
 
         # Index paragraphs (only in PROCEDURE DIVISION)
         proc_div_start = 0
-        proc_div_offset = 0
         for div in index.divisions:
             if "PROCEDURE" in div.name:
                 proc_div_start = div.line_start
-                # Find character offset for PROCEDURE DIVISION
-                proc_div_offset = line_offsets[proc_div_start - 1] if proc_div_start > 0 else 0
                 break
 
         if proc_div_start > 0:
             # Search only in PROCEDURE DIVISION portion with progress
-            para_matches = scan_with_progress(
-                self.PARAGRAPH_PATTERN, "Paragraphs", 35, 55, proc_div_offset
+            para_matches = scan_chunked_with_progress(
+                self.PARAGRAPH_PATTERN, "Paragraphs", 35, 55, proc_div_start
             )
-            for match in para_matches:
-                line_num = get_line_num(match.start())
+            for match, line_num in para_matches:
                 para_name = match.group(1).upper()
 
                 # Skip if it looks like a section
@@ -261,11 +283,10 @@ class StructuralIndexer:
         report("Finding copybooks", 55)
 
         # Index COPY statements with progress
-        copy_matches = scan_with_progress(
+        copy_matches = scan_chunked_with_progress(
             self.COPY_PATTERN, "Copybooks", 55, 75
         )
-        for match in copy_matches:
-            line_num = get_line_num(match.start())
+        for match, line_num in copy_matches:
             copybook_name = match.group(1).upper()
             index.copybooks.append(IndexEntry(
                 name=copybook_name,
@@ -276,11 +297,10 @@ class StructuralIndexer:
         report("Finding data items", 75)
 
         # Index level-01 data items with progress
-        data_matches = scan_with_progress(
+        data_matches = scan_chunked_with_progress(
             self.LEVEL_01_PATTERN, "Data items", 75, 90
         )
-        for match in data_matches:
-            line_num = get_line_num(match.start())
+        for match, line_num in data_matches:
             item_name = match.group(1).upper()
             index.data_items_01.append(IndexEntry(
                 name=item_name,
