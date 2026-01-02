@@ -79,12 +79,13 @@ class StructuralIndexer:
 
     # Prefix pattern matches:
     # - 6 digits (sequence numbers): "000100"
-    # - 6 spaces: "      "
+    # - 6-8 spaces: "      " or "       "
     # - Version markers: "1.1    ", "07.141", "01.141", "3.2001"
     # - Panvalet with area indicator: "7.682A", "7.141A" (A=Area A, B=Area B)
-    # - Any mix of digits, dots, letters, spaces before code starts
-    # Note: Some formats like "3.2001 " are 7 chars, so we allow up to 12
-    PREFIX = r"^[\d\s.A-Z]{0,12}\s*"
+    # - No prefix at all (code starts at column 1)
+    # Key: version number is SHORT (1-6 chars with dots) followed by optional A/B and REQUIRED space(s)
+    # The space after the prefix is mandatory - this distinguishes prefix from code
+    PREFIX = r"^(?:[\d.]{1,6}[A-B]?\s+|[\s]{6,8})?"
 
     # Division pattern: "IDENTIFICATION DIVISION" or "ID DIVISION", etc.
     DIVISION_PATTERN = re.compile(

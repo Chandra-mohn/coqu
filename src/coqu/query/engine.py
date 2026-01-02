@@ -7,6 +7,7 @@ from typing import Optional
 from coqu.query.parser import QueryParser, ParsedQuery
 from coqu.query.commands.base import Command, QueryResult
 from coqu.query.commands.divisions import DivisionsCommand, DivisionCommand
+from coqu.query.commands.sections import SectionsCommand, SectionCommand, ProcedureSectionsCommand
 from coqu.query.commands.paragraphs import ParagraphsCommand, ParagraphCommand
 from coqu.query.commands.variables import (
     WorkingStorageCommand,
@@ -52,6 +53,10 @@ class QueryEngine:
             # Divisions
             DivisionsCommand(),
             DivisionCommand(),
+            # Sections
+            SectionsCommand(),
+            SectionCommand(),
+            ProcedureSectionsCommand(),
             # Paragraphs
             ParagraphsCommand(),
             ParagraphCommand(),
@@ -170,6 +175,7 @@ class QueryEngine:
         # Group by category
         categories = {
             "Divisions": ["divisions", "division"],
+            "Sections": ["sections", "section", "procedure-sections"],
             "Paragraphs": ["paragraphs", "paragraph"],
             "Variables": ["working-storage", "variable", "file-section", "linkage"],
             "Copybooks": ["copybooks", "copybook", "copybook-deps"],

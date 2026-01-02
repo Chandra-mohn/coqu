@@ -217,9 +217,9 @@ class MetaCommandHandler:
             lines.append(f"  PROGRAM-ID: {prog.program_id}")
             lines.append(f"  Path: {prog.path}")
             lines.append(f"  Lines: {prog.lines}")
-            lines.append(f"  Divisions: {len(prog.divisions)}")
-            lines.append(f"  Sections: {len(prog.get_all_sections())}")
-            lines.append(f"  Paragraphs: {len(prog.get_all_paragraphs())}")
+            lines.append(f"  Divisions: {len(prog.program.divisions)}")
+            lines.append(f"  Sections: {len(prog.program.get_all_sections())}")
+            lines.append(f"  Paragraphs: {len(prog.program.get_all_paragraphs())}")
             lines.append(f"  Copybooks: {len(prog.copybook_refs)}")
             lines.append("")
 
