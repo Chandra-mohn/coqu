@@ -118,42 +118,69 @@ class StructuralIndexer:
         re.IGNORECASE | re.MULTILINE,
     )
 
-    def index(self, source: str) -> StructuralIndex:
+    def index(
+        self,
+        source: str,
+        progress_callback: Optional[callable] = None,
+    ) -> StructuralIndex:
         """
         Create structural index from COBOL source.
 
         Args:
             source: COBOL source code as string
+            progress_callback: Optional callback(stage, percent) for progress updates
 
         Returns:
             StructuralIndex with divisions, sections, paragraphs, etc.
         """
+        def report(stage: str, pct: int) -> None:
+            if progress_callback:
+                progress_callback(stage, pct)
+
+        report("Normalizing", 0)
+
         # Normalize line endings (Windows CRLF -> LF)
-        source = source.replace("\r\n", "\n").replace("\r", "\n")
+        if "\r" in source:
+            source = source.replace("\r\n", "\n").replace("\r", "\n")
 
         index = StructuralIndex()
-        lines = source.split("\n")
-        index.total_lines = len(lines)
 
-        # Track current context for determining paragraph scope
-        current_division: Optional[str] = None
-        in_procedure_division = False
+        report("Building line index", 5)
 
-        # Index divisions
+        # Build line offset index for O(1) line number lookup
+        # This is the key optimization - build once, use many times
+        line_offsets = [0]
+        pos = 0
+        while True:
+            pos = source.find("\n", pos)
+            if pos == -1:
+                break
+            pos += 1
+            line_offsets.append(pos)
+        index.total_lines = len(line_offsets)
+
+        def get_line_num(char_pos: int) -> int:
+            """Binary search for line number - O(log n) instead of O(n)."""
+            import bisect
+            return bisect.bisect_right(line_offsets, char_pos)
+
+        report("Finding divisions", 10)
+
+        # Index divisions (typically only 4)
         for match in self.DIVISION_PATTERN.finditer(source):
-            line_num = source[:match.start()].count("\n") + 1
+            line_num = get_line_num(match.start())
             div_name = match.group(1).upper()
             index.divisions.append(IndexEntry(
                 name=f"{div_name} DIVISION",
                 type="division",
                 line_start=line_num,
             ))
-            if div_name == "PROCEDURE":
-                in_procedure_division = True
+
+        report("Finding sections", 20)
 
         # Index sections
         for match in self.SECTION_PATTERN.finditer(source):
-            line_num = source[:match.start()].count("\n") + 1
+            line_num = get_line_num(match.start())
             section_name = match.group(1).upper()
             index.sections.append(IndexEntry(
                 name=f"{section_name} SECTION",
@@ -161,22 +188,25 @@ class StructuralIndexer:
                 line_start=line_num,
             ))
 
+        report("Finding paragraphs", 40)
+
         # Index paragraphs (only in PROCEDURE DIVISION)
-        # Find where PROCEDURE DIVISION starts
         proc_div_start = 0
+        proc_div_offset = 0
         for div in index.divisions:
             if "PROCEDURE" in div.name:
                 proc_div_start = div.line_start
+                # Find character offset for PROCEDURE DIVISION
+                proc_div_offset = line_offsets[proc_div_start - 1] if proc_div_start > 0 else 0
                 break
 
         if proc_div_start > 0:
-            # Only look for paragraphs after PROCEDURE DIVISION
-            proc_source = "\n".join(lines[proc_div_start - 1:])
-            for match in self.PARAGRAPH_PATTERN.finditer(proc_source):
-                line_num = proc_div_start + proc_source[:match.start()].count("\n")
+            # Search only in PROCEDURE DIVISION portion
+            for match in self.PARAGRAPH_PATTERN.finditer(source, proc_div_offset):
+                line_num = get_line_num(match.start())
                 para_name = match.group(1).upper()
 
-                # Skip if it looks like a section (followed by SECTION keyword)
+                # Skip if it looks like a section
                 if "SECTION" in para_name:
                     continue
 
@@ -190,9 +220,11 @@ class StructuralIndexer:
                     line_start=line_num,
                 ))
 
+        report("Finding copybooks", 60)
+
         # Index COPY statements
         for match in self.COPY_PATTERN.finditer(source):
-            line_num = source[:match.start()].count("\n") + 1
+            line_num = get_line_num(match.start())
             copybook_name = match.group(1).upper()
             index.copybooks.append(IndexEntry(
                 name=copybook_name,
@@ -200,9 +232,11 @@ class StructuralIndexer:
                 line_start=line_num,
             ))
 
+        report("Finding data items", 80)
+
         # Index level-01 data items
         for match in self.LEVEL_01_PATTERN.finditer(source):
-            line_num = source[:match.start()].count("\n") + 1
+            line_num = get_line_num(match.start())
             item_name = match.group(1).upper()
             index.data_items_01.append(IndexEntry(
                 name=item_name,
@@ -210,8 +244,12 @@ class StructuralIndexer:
                 line_start=line_num,
             ))
 
+        report("Calculating ranges", 90)
+
         # Post-process: calculate line_end for each entry
         self._calculate_line_ends(index)
+
+        report("Complete", 100)
 
         return index
 

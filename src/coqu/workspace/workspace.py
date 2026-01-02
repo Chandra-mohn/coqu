@@ -58,17 +58,27 @@ class Workspace:
         self.copybook_resolver.add_path(path)
         self._parser.add_copybook_path(path)
 
-    def load(self, path: Path, force_reparse: bool = False) -> LoadedProgram:
+    def load(
+        self,
+        path: Path,
+        force_reparse: bool = False,
+        progress_callback: Optional[callable] = None,
+    ) -> LoadedProgram:
         """
         Load a COBOL program into the workspace.
 
         Args:
             path: Path to COBOL source file
             force_reparse: Force parsing even if cached
+            progress_callback: Optional callback(stage, percent) for progress
 
         Returns:
             LoadedProgram instance
         """
+        def report(stage: str, pct: int) -> None:
+            if progress_callback:
+                progress_callback(stage, pct)
+
         path = path.resolve()
         name = path.stem.upper()
 
@@ -77,6 +87,8 @@ class Workspace:
             existing = self.programs[name]
             if existing.path == path:
                 return existing
+
+        report("Reading file", 5)
 
         # Read source for hash calculation
         source = path.read_text()
@@ -88,20 +100,26 @@ class Workspace:
         from_cache = False
 
         if self.cache_manager and not force_reparse:
+            report("Checking cache", 10)
             program = self.cache_manager.get(source_hash)
             if program:
                 from_cache = True
+                report("Loaded from cache", 100)
 
         # Parse if not cached
         parse_time_ms = 0.0
         if not program:
+            report("Parsing", 15)
             start = time.perf_counter()
-            program = self._parser.parse_file(path)
+            program = self._parser.parse_file(path, progress_callback=progress_callback)
             parse_time_ms = (time.perf_counter() - start) * 1000
 
             # Cache the result
             if self.cache_manager:
+                report("Caching", 95)
                 self.cache_manager.put(source_hash, program)
+
+        report("Complete", 100)
 
         # Create loaded program
         loaded = LoadedProgram(
@@ -176,12 +194,17 @@ class Workspace:
         self.programs.clear()
         return count
 
-    def reload(self, name: str) -> Optional[LoadedProgram]:
+    def reload(
+        self,
+        name: str,
+        progress_callback: Optional[callable] = None,
+    ) -> Optional[LoadedProgram]:
         """
         Reload a program (reparse from source).
 
         Args:
             name: Program name
+            progress_callback: Optional progress callback
 
         Returns:
             Reloaded program or None if not found
@@ -191,9 +214,12 @@ class Workspace:
             return None
 
         path = self.programs[name_upper].path
-        return self.load(path, force_reparse=True)
+        return self.load(path, force_reparse=True, progress_callback=progress_callback)
 
-    def reload_all(self) -> list[LoadedProgram]:
+    def reload_all(
+        self,
+        progress_callback: Optional[callable] = None,
+    ) -> list[LoadedProgram]:
         """
         Reload all programs.
 
@@ -206,7 +232,7 @@ class Workspace:
         reloaded = []
         for path in paths:
             try:
-                prog = self.load(path, force_reparse=True)
+                prog = self.load(path, force_reparse=True, progress_callback=progress_callback)
                 reloaded.append(prog)
             except Exception:
                 pass

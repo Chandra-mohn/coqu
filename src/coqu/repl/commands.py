@@ -99,6 +99,19 @@ class MetaCommandHandler:
 
     # Command implementations
 
+    def _print_progress(self, stage: str, percent: int) -> None:
+        """Print progress indicator inline."""
+        import sys
+        bar_width = 30
+        filled = int(bar_width * percent / 100)
+        bar = "=" * filled + "-" * (bar_width - filled)
+        # Use carriage return to overwrite line
+        sys.stdout.write(f"\r[{bar}] {percent:3d}% {stage:<20}")
+        sys.stdout.flush()
+        if percent >= 100:
+            sys.stdout.write("\r" + " " * 60 + "\r")  # Clear line
+            sys.stdout.flush()
+
     def cmd_load(self, args: list[str]) -> tuple[str, bool]:
         """Load a COBOL file."""
         if not args:
@@ -109,7 +122,7 @@ class MetaCommandHandler:
             return f"File not found: {path}", False
 
         try:
-            prog = self.workspace.load(path)
+            prog = self.workspace.load(path, progress_callback=self._print_progress)
             cache_str = " (from cache)" if prog.from_cache else f" (parsed in {prog.parse_time_ms:.0f}ms)"
             return f"Loaded {prog.name}: {prog.program_id} ({prog.lines} lines){cache_str}", False
         except Exception as e:
@@ -142,12 +155,12 @@ class MetaCommandHandler:
     def cmd_reload(self, args: list[str]) -> tuple[str, bool]:
         """Reload program(s)."""
         if args:
-            prog = self.workspace.reload(args[0])
+            prog = self.workspace.reload(args[0], progress_callback=self._print_progress)
             if prog:
                 return f"Reloaded {prog.name} ({prog.parse_time_ms:.0f}ms)", False
             return f"Program not loaded: {args[0]}", False
         else:
-            programs = self.workspace.reload_all()
+            programs = self.workspace.reload_all(progress_callback=self._print_progress)
             return f"Reloaded {len(programs)} programs", False
 
     def cmd_list(self, args: list[str]) -> tuple[str, bool]:
