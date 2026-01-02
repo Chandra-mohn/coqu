@@ -134,9 +134,13 @@ class StructuralIndexer:
         Returns:
             StructuralIndex with divisions, sections, paragraphs, etc.
         """
-        def report(stage: str, pct: int) -> None:
+        # Map internal progress (0-100) to external range (15-90)
+        # This integrates with workspace.py which uses 0-15 for reading, 15-90 for parsing, 90-100 for caching
+        def report(stage: str, internal_pct: int) -> None:
             if progress_callback:
-                progress_callback(stage, pct)
+                # Scale 0-100 internal to 15-90 external
+                external_pct = 15 + int(internal_pct * 0.75)
+                progress_callback(stage, external_pct)
 
         report("Normalizing", 0)
 

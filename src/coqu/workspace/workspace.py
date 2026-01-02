@@ -109,14 +109,14 @@ class Workspace:
         # Parse if not cached
         parse_time_ms = 0.0
         if not program:
-            report("Parsing", 15)
+            # Note: indexer reports progress from 15-90% internally
             start = time.perf_counter()
             program = self._parser.parse_file(path, progress_callback=progress_callback)
             parse_time_ms = (time.perf_counter() - start) * 1000
 
             # Cache the result
             if self.cache_manager:
-                report("Caching", 95)
+                report("Caching", 92)
                 self.cache_manager.put(source_hash, program)
 
         report("Complete", 100)
