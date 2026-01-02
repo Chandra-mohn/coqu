@@ -268,6 +268,20 @@ class CobolProgram:
                 return div
         return None
 
+    def get_all_sections(self) -> list[Section]:
+        """Get all sections from all divisions."""
+        sections: list[Section] = []
+        for div in self.divisions:
+            sections.extend(div.sections)
+        return sections
+
+    def get_procedure_sections(self) -> list[Section]:
+        """Get sections from PROCEDURE DIVISION only."""
+        proc_div = self.get_division("PROCEDURE")
+        if not proc_div:
+            return []
+        return list(proc_div.sections)
+
     def get_all_paragraphs(self) -> list[Paragraph]:
         """Get all paragraphs from PROCEDURE DIVISION."""
         proc_div = self.get_division("PROCEDURE")
