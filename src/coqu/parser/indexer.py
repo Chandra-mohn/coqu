@@ -160,14 +160,45 @@ class StructuralIndexer:
             line_offsets.append(pos)
         index.total_lines = len(line_offsets)
 
+        import bisect
+
         def get_line_num(char_pos: int) -> int:
             """Binary search for line number - O(log n) instead of O(n)."""
-            import bisect
             return bisect.bisect_right(line_offsets, char_pos)
+
+        # For large files, we report progress during regex scanning
+        # Progress allocation: divisions 10-15, sections 15-35, paragraphs 35-55,
+        #                      copybooks 55-75, data items 75-90
+        total_chars = len(source)
+        is_large_file = total_chars > 500000  # ~10K+ lines
+
+        def scan_with_progress(
+            pattern,
+            stage_name: str,
+            start_pct: int,
+            end_pct: int,
+            start_offset: int = 0,
+        ):
+            """Scan with progress reporting for large files."""
+            matches = []
+            last_report_pos = start_offset
+            report_interval = max(total_chars // 20, 100000)  # Report every 5% or 100KB
+
+            for match in pattern.finditer(source, start_offset):
+                matches.append(match)
+                # Report progress periodically
+                if is_large_file and match.start() - last_report_pos > report_interval:
+                    progress_in_stage = (match.start() - start_offset) / max(total_chars - start_offset, 1)
+                    current_pct = start_pct + int(progress_in_stage * (end_pct - start_pct))
+                    line_num = get_line_num(match.start())
+                    report(f"{stage_name} (line {line_num:,})", current_pct)
+                    last_report_pos = match.start()
+
+            return matches
 
         report("Finding divisions", 10)
 
-        # Index divisions (typically only 4)
+        # Index divisions (typically only 4, fast)
         for match in self.DIVISION_PATTERN.finditer(source):
             line_num = get_line_num(match.start())
             div_name = match.group(1).upper()
@@ -177,10 +208,13 @@ class StructuralIndexer:
                 line_start=line_num,
             ))
 
-        report("Finding sections", 20)
+        report("Finding sections", 15)
 
-        # Index sections
-        for match in self.SECTION_PATTERN.finditer(source):
+        # Index sections with progress
+        section_matches = scan_with_progress(
+            self.SECTION_PATTERN, "Sections", 15, 35
+        )
+        for match in section_matches:
             line_num = get_line_num(match.start())
             section_name = match.group(1).upper()
             index.sections.append(IndexEntry(
@@ -189,7 +223,7 @@ class StructuralIndexer:
                 line_start=line_num,
             ))
 
-        report("Finding paragraphs", 40)
+        report("Finding paragraphs", 35)
 
         # Index paragraphs (only in PROCEDURE DIVISION)
         proc_div_start = 0
@@ -202,8 +236,11 @@ class StructuralIndexer:
                 break
 
         if proc_div_start > 0:
-            # Search only in PROCEDURE DIVISION portion
-            for match in self.PARAGRAPH_PATTERN.finditer(source, proc_div_offset):
+            # Search only in PROCEDURE DIVISION portion with progress
+            para_matches = scan_with_progress(
+                self.PARAGRAPH_PATTERN, "Paragraphs", 35, 55, proc_div_offset
+            )
+            for match in para_matches:
                 line_num = get_line_num(match.start())
                 para_name = match.group(1).upper()
 
@@ -221,10 +258,13 @@ class StructuralIndexer:
                     line_start=line_num,
                 ))
 
-        report("Finding copybooks", 60)
+        report("Finding copybooks", 55)
 
-        # Index COPY statements
-        for match in self.COPY_PATTERN.finditer(source):
+        # Index COPY statements with progress
+        copy_matches = scan_with_progress(
+            self.COPY_PATTERN, "Copybooks", 55, 75
+        )
+        for match in copy_matches:
             line_num = get_line_num(match.start())
             copybook_name = match.group(1).upper()
             index.copybooks.append(IndexEntry(
@@ -233,10 +273,13 @@ class StructuralIndexer:
                 line_start=line_num,
             ))
 
-        report("Finding data items", 80)
+        report("Finding data items", 75)
 
-        # Index level-01 data items
-        for match in self.LEVEL_01_PATTERN.finditer(source):
+        # Index level-01 data items with progress
+        data_matches = scan_with_progress(
+            self.LEVEL_01_PATTERN, "Data items", 75, 90
+        )
+        for match in data_matches:
             line_num = get_line_num(match.start())
             item_name = match.group(1).upper()
             index.data_items_01.append(IndexEntry(
