@@ -29,6 +29,36 @@ def create_parser() -> argparse.ArgumentParser:
         version=f"coqu {__version__}",
     )
 
+    # Add subparsers for commands
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    # Coverage subcommand
+    coverage_parser = subparsers.add_parser(
+        "coverage",
+        help="Analyze parser coverage of a COBOL file",
+    )
+    coverage_parser.add_argument(
+        "file",
+        type=Path,
+        help="COBOL file to analyze",
+    )
+    coverage_parser.add_argument(
+        "--mode",
+        choices=["antlr", "indexer", "both"],
+        default="both",
+        help="Parser mode to analyze (default: both)",
+    )
+    coverage_parser.add_argument(
+        "--show-uncovered",
+        action="store_true",
+        help="Show list of uncovered line numbers",
+    )
+    coverage_parser.add_argument(
+        "--show-source",
+        action="store_true",
+        help="Show uncovered source lines",
+    )
+
     parser.add_argument(
         "files",
         nargs="*",
@@ -100,6 +130,10 @@ def main() -> int:
     parser = create_parser()
     args = parser.parse_args()
 
+    # Handle coverage command
+    if args.command == "coverage":
+        return run_coverage(args)
+
     # Load config
     config = load_config(args.config)
 
@@ -146,6 +180,44 @@ def main() -> int:
         use_indexer_only,
         config.history_file,
     )
+
+
+def run_coverage(args) -> int:
+    """Run coverage analysis."""
+    from coqu.parser.coverage import CoverageAnalyzer
+
+    if not args.file.exists():
+        print(f"Error: File not found: {args.file}", file=sys.stderr)
+        return 1
+
+    analyzer = CoverageAnalyzer()
+    results = analyzer.analyze_file(args.file, args.mode)
+
+    # Read source for --show-source option
+    source_lines = []
+    if args.show_source:
+        source_lines = args.file.read_text().split("\n")
+
+    for mode_name, result in results.items():
+        print(f"\n{'='*60}")
+        print(f"Coverage Analysis: {args.file.name} ({mode_name.upper()} parser)")
+        print('='*60)
+        print(result.summary())
+
+        if args.show_uncovered:
+            print()
+            print(result.uncovered_list())
+
+        if args.show_source and result.uncovered_lines:
+            print()
+            print("Uncovered source lines:")
+            print("-" * 40)
+            for line_num in sorted(result.uncovered_lines):
+                if line_num <= len(source_lines):
+                    print(f"{line_num:4d}: {source_lines[line_num - 1]}")
+
+    # Return success if coverage is above threshold (e.g., any coverage)
+    return 0
 
 
 def run_command(

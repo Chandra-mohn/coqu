@@ -186,31 +186,6 @@ class CobolASTVisitor(Cobol85Visitor):
             self.current_section = section
         return self.visitChildren(ctx)
 
-    def visitParagraph(self, ctx):
-        """Visit paragraph in PROCEDURE DIVISION."""
-        location = self._get_location(ctx)
-
-        # Get paragraph name
-        name_ctx = ctx.paragraphName()
-        name = name_ctx.getText().upper() if name_ctx else "UNKNOWN"
-
-        para = Paragraph(
-            name=name,
-            location=location,
-        )
-
-        # Extract PERFORM and CALL targets
-        para.performs = self._extract_performs(ctx)
-        para.calls = self._extract_calls(ctx)
-
-        # Add to current section or division
-        if self.current_section and self.current_division and "PROCEDURE" in self.current_division.name:
-            self.current_section.paragraphs.append(para)
-        elif self.current_division and "PROCEDURE" in self.current_division.name:
-            self.current_division.paragraphs.append(para)
-
-        return self.visitChildren(ctx)
-
     def visitDataDescriptionEntry(self, ctx):
         """Visit data description entry."""
         if not self.current_section:
@@ -277,6 +252,74 @@ class CobolASTVisitor(Cobol85Visitor):
             calls.append(match.group(1))
 
         return calls
+
+    def visitStatement(self, ctx):
+        """Visit a statement and record it."""
+        if not ctx:
+            return self.visitChildren(ctx)
+
+        location = self._get_location(ctx)
+
+        # Determine statement type from the child context
+        stmt_type = self._get_statement_type(ctx)
+
+        stmt = Statement(
+            type=stmt_type,
+            location=location,
+        )
+
+        # Add to current paragraph if we're tracking one
+        if hasattr(self, '_current_paragraph') and self._current_paragraph:
+            self._current_paragraph.statements.append(stmt)
+
+        return self.visitChildren(ctx)
+
+    def _get_statement_type(self, ctx) -> str:
+        """Determine statement type from context."""
+        # Get the first child which indicates statement type
+        if ctx.getChildCount() > 0:
+            child = ctx.getChild(0)
+            child_name = type(child).__name__
+            # Extract type from context name, e.g. "MoveStatementContext" -> "MOVE"
+            if child_name.endswith("StatementContext"):
+                return child_name[:-16].upper()  # Remove "StatementContext"
+            elif child_name.endswith("Context"):
+                return child_name[:-7].upper()  # Remove "Context"
+        return "UNKNOWN"
+
+    def visitParagraph(self, ctx):
+        """Visit paragraph in PROCEDURE DIVISION."""
+        location = self._get_location(ctx)
+
+        # Get paragraph name
+        name_ctx = ctx.paragraphName()
+        name = name_ctx.getText().upper() if name_ctx else "UNKNOWN"
+
+        para = Paragraph(
+            name=name,
+            location=location,
+        )
+
+        # Track current paragraph for statement collection
+        self._current_paragraph = para
+
+        # Visit children to collect statements
+        self.visitChildren(ctx)
+
+        # Clear current paragraph tracker
+        self._current_paragraph = None
+
+        # Extract PERFORM and CALL targets
+        para.performs = self._extract_performs(ctx)
+        para.calls = self._extract_calls(ctx)
+
+        # Add to current section or division
+        if self.current_section and self.current_division and "PROCEDURE" in self.current_division.name:
+            self.current_section.paragraphs.append(para)
+        elif self.current_division and "PROCEDURE" in self.current_division.name:
+            self.current_division.paragraphs.append(para)
+
+        return None  # Don't visit children again
 
 
 class CobolParser:
